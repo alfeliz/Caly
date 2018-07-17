@@ -5,7 +5,7 @@
 #Calibration of ALEX probes.
 #####################################################################
 #coding: latin-1
-#Version 1.0
+#Version 1.2
 
 
 ######################################
@@ -14,19 +14,16 @@
 import os #File management
 import numpy as np #Numerical work in Python. Yeah!!!
 import peakutils #Peak finder utilities...From https://bitbucket.org/lucashnegri/peakutils
-#PeakUtils is stored in the folder "peakutils"...
-from matplotlib import pyplot
+#PeakUtils is stored in the folder "peakutils" in the folder of this program...
 from scipy.signal import savgol_filter #To smooth the data...
 from scipy.optimize import curve_fit #Data fitting.
 
 
-##########################################
-# General parameters of the program
-##########################################
 
 #########################################
-# These functons are for a short circuit
+# These functions are for a short circuit
 #########################################
+
 ###########################
 # Current function:
 ###########################
@@ -45,6 +42,18 @@ def dcurr(t, alpha, omega, t0, B, C):
 def volt(t, alpha, omega, t0, VA):
 	return VA * np.exp(- alpha * (t - t0)) * np.cos( omega * (t - t0) )
 
+###################################
+# To convert np.arrays into strings:
+###################################
+def to_str(var):
+    return str(list(np.reshape(np.asarray(var), (1, np.size(var)))[0]))[1:-1]
+
+
+
+#############################################
+#Starting program with some intialization:
+#############################################
+
 #This dictionary has the structure of the channels in the scope.
 #It can be extracted from the HTML shot file, but it takes a lot of time.
 chan_list = {'CH1':'Rog','CH2':'2Res','CH3':'3Res','CH4':'Cur'}
@@ -56,14 +65,16 @@ K_Rog = []
 K_Rog_err = []
 
 
+
 ###############################################################
 # Main boby. Iterative over the RAW folders.
 ###############################################################
+
 folderdata = os.path.dirname(os.path.abspath(__file__)) #Folder with the folders with the shots information data. Script must executed from it.
 
 folderlist = os.walk(folderdata)
 #os.walk returns an structure with the files, directories and fles inside the directories of a given path,
-#   ordered as triplets, with the order used later.
+#   ordered as triplets, with the order used in the next FOR instruction.
 
 for dirpath,dirnames,filenames in folderlist: #Make a loop through all the elements
 	for folders in dirnames: #This is the structure of an iterator on the objects of dirnames, that I name folders
@@ -100,23 +111,26 @@ for dirpath,dirnames,filenames in folderlist: #Make a loop through all the eleme
 					print('\n')			
 			Vol = Vol_3Res #Creating voltage through the wire
 			Vol[:,1] = Vol_2Res[:,1] - Vol_3Res[:,1] #Voltage through the wire
-			Vol_smooth = savgol_filter(Vol[:,1],31,2) #Smoothng voltage to obtain peaks.
+			Vol_smooth = savgol_filter(Vol[:,1],31,2) #Smoothing voltage to obtain peaks.
+			
 			
 			###############################################################
 			# Finding the signal period
 			###############################################################
-			indexes = peakutils.indexes(Vol_smooth, thres = 1/1000, min_dist = 2500) #Index positions of peaks. It loks like it works quite well...
+			indexes = peakutils.indexes(Vol_smooth, thres = 1/1000, min_dist = 2500) #Index positions of peaks. It loks like it works quite well(In some cases)...
 			
 			Period = np.mean(np.diff(Vol[indexes[1:],0])) #Find the differences in time between all the peaks 
-			#(but the firstone, that is related with the spark gap) and calculate the mean of that. 
+			#(but the first one, that is related with the spark gap) and calculate the mean of that. 
 			#And you have the period of the signal.IN MICROSECONDS!!!!!!!
 			Err_Period = np.std(np.diff(Vol[indexes[1:],0]))
+			
 			
 			###############################################################
 			#Calculating inductance:
 			###############################################################
 			L = ( (Period)**2 * 1e-12) / (2.2 * 1e-6 * 4 * np.pi**2 ) #Inductance in Farads
 			Err_L = ( (Err_Period)**2 * 1e-12) / (2.2 * 1e-6 * 4 * np.pi**2 ) #Inductance error in Farads
+
 
 			###############################################################
 			# Fitting the current signal not calibrated (after spark gap on)
@@ -133,6 +147,7 @@ for dirpath,dirnames,filenames in folderlist: #Make a loop through all the eleme
 			t0 = curr_params[0][2]
 			A = curr_params[0][3]
 			
+			
 			###############################################################
 			# Fitting the dotcurrent signal not calibrated (after spark gap on)
 			###############################################################
@@ -146,6 +161,8 @@ for dirpath,dirnames,filenames in folderlist: #Make a loop through all the eleme
 			###############################################################
 			# Fitting the circuit voltage to find the maximun voltage, 
 			#	initial charging voltage approx.
+			# Notice that errors are calculated like the substraction
+			#   of function(values + sigmas) - function.
 			###############################################################
 			volt_params = curve_fit(volt, Vol[indexes[1]:,0],Vol[indexes[1]:,1], p0 = [alpha, omega, t0, A])
 			sigma_volt_params = np.sqrt(np.diagonal(volt_params[1])) #Error in the voltage parameters
@@ -153,6 +170,7 @@ for dirpath,dirnames,filenames in folderlist: #Make a loop through all the eleme
 			V0 = np.max(volt(Vol[:,0],*volt_params[0])) #Initial voltage.The charging one (Volts)
 			V0_up = np.max(volt(Vol[:,0],*(volt_params[0]+sigma_volt_params))) #Calculating the errors...
 			V0_err = V0_up - V0 #Voltage error
+			
 			
 			###############################################################
 			# Finding maximum current in no calibrated units, 
@@ -162,6 +180,7 @@ for dirpath,dirnames,filenames in folderlist: #Make a loop through all the eleme
 			curr_t1_up = np.max(curr(CH4[indexes[0]:,0],*(curr_params[0]+sigma_curr_params))) #Calculating the errors...
 			curr_t1_err = curr_t1_up - curr_t1 #Uncalibrated current error			
 			
+			
 			###############################################################
 			# Finding maximum dotcurrent in no calibrated units, 
 			#	to make the calibration of the Rogowsky signal.
@@ -170,19 +189,32 @@ for dirpath,dirnames,filenames in folderlist: #Make a loop through all the eleme
 			dotcurr_t1_up = np.max(dcurr(CH1[indexes[0]:,0],*(dcurr_params[0]+sigma_dcurr_params)))
 			dotcurr_t1_err = dotcurr_t1_up - dotcurr_t1 #Uncalibrated dot current error
 
+
 			###############################################################
 			# Calibration constants of the RC integrator and the Rogowsky:
 			#	With error calculation, too
-			###############################################################	
-			K_curr.append(V0 / (  omega * 1e6 * L * curr_t1  )) #Calibration of current probe
-			#And its error:
-			K_curr_err.append( ( V0_err/ (  omega * 1e6 * L * curr_t1  ))  +  ( (V0 * Err_L) / (omega * 1e6 * L**2 * curr_t1) ) + ( (V0 * curr_t1_err )/(omega * 1e6 * L * curr_t1**2) ) + ( (V0 * omega_err)/(omega**2 * 1e12 * L * curr_t1 ) ) )
-			
-			
-			K_Rog.append(V0 / ( L * dotcurr_t1) ) #Calibration of dot current probe, and error next line:
-			K_Rog_err.append( (V0_err /( L * dotcurr_t1)) + ((V0 * Err_L)/(L**2 * dotcurr_t1)) + ( (V0 * dotcurr_t1_err)/(L * dotcurr_t1**2) ) )
+			###############################################################
+			#Current probe calibration and error parameters::
+			cali_curr = 	V0 / (  omega * 1e6 * L * curr_t1  )
+			cali_curr_err = ( V0_err/ (  omega * 1e6 * L * curr_t1  ))  +  ( (V0 * Err_L) / (omega * 1e6 * L**2 * curr_t1) ) + ( (V0 * curr_t1_err )/(omega * 1e6 * L * curr_t1**2) ) + ( (V0 * omega_err)/(omega**2 * 1e12 * L * curr_t1 ) )		
+			#Appending parameters if there is nothing extrange with the error:
+			if np.isfinite(cali_curr_err):
+				K_curr.append(cali_curr) #Calibration of current probe
+				K_curr_err.append(cali_curr_err ) 
+				
+			#Rogowsky probe calibration and error parameters:
+			cali_rog = V0 / ( L * dotcurr_t1)
+			cali_rog_err =  (V0_err /( L * dotcurr_t1)) + ((V0 * Err_L)/(L**2 * dotcurr_t1)) + ( (V0 * dotcurr_t1_err)/(L * dotcurr_t1**2) )
+			#Appending data if there is nothing extrange with the error:
+			if np.isfinite(cali_rog_err):
+				K_Rog.append(cali_rog) #Calibration of dot current probe, and error next line:
+				K_Rog_err.append(cali_rog_err)
 
 
+
+##############################################################
+#Making weithegthed averaga and saving data into a TXT file:
+##############################################################
 			
 #Weitgthed average of the Current calibration:
 K_current = np.sum( K_curr/np.power(K_curr_err,2) ) / np.sum(1/np.power(K_curr_err,2))
@@ -198,7 +230,11 @@ with open("ALEX-Rogowsky-Current-cali.txt","w") as save_file:
 	save_file.write("Rogowsky constant: (A/s / V)\n")
 	save_file.write("{:0.4e}".format(K_Rogos)+ " +- "+"{:0.4e}".format(K_Rogos_err)+"\n\n\n")
 	save_file.write("Current constant: (A / V)\n")
-	save_file.write("{:0.4e}".format(K_current)+" +- "+"{:0.4e}".format(K_current_err)+"\n")			
+	save_file.write("{:0.4e}".format(K_current)+" +- "+"{:0.4e}".format(K_current_err)+"\n")
+	save_file.write(" \n K_curr \n"+to_str(K_curr)+"\n")
+	save_file.write("\n K_curr_err \n"+to_str(K_curr_err)+"\n\n")			
+	save_file.write("\n K_Rog \n"+to_str(K_Rog))
+	save_file.write("\n K_Rog_err \n"+to_str(K_Rog_err))			
 
 print("Data saved and stored in file `ALEX-Rogowsky-Current-cali.txt'")
 
